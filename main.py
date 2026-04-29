@@ -43,6 +43,7 @@ class RepoSense:
         self.available_exts = []
         self.target_extensions = []
         self.since_date = "2026-01-01"
+        self.outlier_cap = None
 
     def run(self) -> None:
         console.print(
@@ -71,10 +72,12 @@ class RepoSense:
                 choices=[
                     "View File Extensions",
                     "Filter Extensions",
+                    "Set Outlier Cap",
                     "View Weekly Commit Activity",
                     "View Git Contributions (+/- lines)",
                     "View Filtered Diffs for User",
                     "View Commit Graph",
+                    "Convert .ipynb to .py and delete .ipynb",
                     "Exit",
                 ],
                 style=questionary.Style(
@@ -91,6 +94,8 @@ class RepoSense:
                 self.view_file_extensions()
             elif choice == "Filter Extensions":
                 self.filter_extensions()
+            elif choice == "Set Outlier Cap":
+                self.set_outlier_cap()
             elif choice == "View Weekly Commit Activity":
                 self.view_weekly_activity()
             elif choice == "View Git Contributions (+/- lines)":
@@ -99,6 +104,8 @@ class RepoSense:
                 self.view_filtered_diffs()
             elif choice == "View Commit Graph":
                 self.view_commit_graph()
+            elif choice == "Convert .ipynb to .py and delete .ipynb":
+                self.convert_ipynb_to_py()
             elif choice == "Exit" or choice is None:
                 self.cleanup()
                 break
@@ -134,6 +141,30 @@ class RepoSense:
                 f"[bold #50fa7b]Filter updated to: {', '.join(target) if target else 'All extensions'}[/bold #50fa7b]",
             )
 
+    def set_outlier_cap(self) -> None:
+        response = Prompt.ask(
+            "Set outlier cap per commit per file type (blank to clear)",
+            default="",
+        )
+        if response.strip() == "":
+            self.outlier_cap = None
+            console.print("[bold #50fa7b]Outlier cap cleared.[/bold #50fa7b]")
+            return
+        try:
+            cap = int(response)
+            if cap <= 0:
+                raise ValueError
+        except ValueError:
+            console.print(
+                "[bold #ff5555]Cap must be a positive integer or blank to clear.[/bold #ff5555]",
+            )
+            return
+
+        self.outlier_cap = cap
+        console.print(
+            f"[bold #50fa7b]Outlier cap set to {cap} lines per commit per file type.[/bold #50fa7b]",
+        )
+
     def _get_stats(self):
         stats = defaultdict(lambda: {"add": 0, "del": 0})
         log_args = [
@@ -141,15 +172,36 @@ class RepoSense:
             f"--since={self.since_date}",
             "--numstat",
             "--no-merges",
-            "--pretty=format:%aN",
+            "--pretty=format:%aN <%aE>",
         ]
         with console.status("[bold #ffb86c]Analyzing git log...[/bold #ffb86c]", spinner="dots"):
             raw_log = self.repo.git.log(*log_args)
             current_author = None
+            commit_totals = defaultdict(lambda: {"add": 0, "del": 0})
+
+            def flush_commit() -> None:
+                if current_author is None:
+                    return
+                for counts in commit_totals.values():
+                    add = counts["add"]
+                    delete = counts["del"]
+                    if self.outlier_cap is not None:
+                        total = add + delete
+                        if total > self.outlier_cap and total > 0:
+                            scale = self.outlier_cap / total
+                            capped_add = round(add * scale)
+                            capped_del = self.outlier_cap - capped_add
+                            add = max(capped_add, 0)
+                            delete = max(capped_del, 0)
+                    stats[current_author]["add"] += add
+                    stats[current_author]["del"] += delete
+                commit_totals.clear()
+
             for line in raw_log.splitlines():
                 if not line.strip():
                     continue
                 if not line[0].isdigit() and not line.startswith("-"):
+                    flush_commit()
                     current_author = line.strip()
                     continue
                 parts = line.split("\t")
@@ -160,8 +212,10 @@ class RepoSense:
                     file_ext = os.path.splitext(file_path)[1]
                     if self.target_extensions and file_ext not in self.target_extensions:
                         continue
-                    stats[current_author]["add"] += int(add)
-                    stats[current_author]["del"] += int(delete)
+                    commit_totals[file_ext]["add"] += int(add)
+                    commit_totals[file_ext]["del"] += int(delete)
+
+            flush_commit()
         return stats
 
     def view_git_contributions(self) -> None:
@@ -188,7 +242,7 @@ class RepoSense:
             "main",
             f"--since={self.since_date}",
             "--no-merges",
-            "--pretty=format:%aN|%ad",
+            "--pretty=format:%aN <%aE>|%ad",
             "--date=short",
         ]
         with console.status(
@@ -283,6 +337,49 @@ class RepoSense:
         env = os.environ.copy()
         env["GIT_PAGER"] = "less -+F -R"
         subprocess.run(cmd, env=env)
+
+    def convert_ipynb_to_py(self) -> None:
+        import json
+
+        converted_count = 0
+        with console.status(
+            "[bold #ffb86c]Converting .ipynb files...[/bold #ffb86c]", spinner="dots"
+        ):
+            for root, dirs, files in os.walk(self.repo_dir):
+                if ".git" in dirs:
+                    dirs.remove(".git")
+                for file in files:
+                    if file.endswith(".ipynb"):
+                        ipynb_path = os.path.join(root, file)
+                        py_path = os.path.splitext(ipynb_path)[0] + ".py"
+
+                        try:
+                            with open(ipynb_path, encoding="utf-8") as f:
+                                notebook = json.load(f)
+
+                            python_code = []
+                            for cell in notebook.get("cells", []):
+                                if cell.get("cell_type") == "code":
+                                    source = cell.get("source", [])
+                                    if isinstance(source, list):
+                                        python_code.append("".join(source))
+                                    else:
+                                        python_code.append(source)
+
+                            with open(py_path, "w", encoding="utf-8") as f:
+                                f.write("\n\n".join(python_code) + "\n")
+
+                            os.remove(ipynb_path)
+                            converted_count += 1
+                        except Exception as e:
+                            console.print(
+                                f"[bold #ff5555]Failed to convert {file}: {e}[/bold #ff5555]"
+                            )
+
+        console.print(
+            f"[bold #50fa7b]Successfully converted {converted_count} .ipynb files to .py and deleted originals.[/bold #50fa7b]"
+        )
+        self.available_exts = get_unique_extensions(self.repo_dir)
 
     def cleanup(self) -> None:
         if os.path.exists(self.repo_dir):
