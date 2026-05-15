@@ -37,7 +37,7 @@ def get_unique_extensions(repo_path) -> list:
 
 class RepoSense:
     def __init__(self) -> None:
-        self.repo_dir = "temp_repo_stats"
+        self.repo_dir = "tmp"
         self.repo = None
         self.repo_url = ""
         self.available_exts = []
@@ -47,7 +47,7 @@ class RepoSense:
 
     def run(self) -> None:
         console.print(
-            Panel.fit("[bold #ffb86c]Claude Repo Sense[/bold #ffb86c]", border_style="#ffb86c"),
+            Panel.fit("[bold #ffb86c]Better Repo Sense[/bold #ffb86c]", border_style="#ffb86c"),
         )
         self.repo_url = Prompt.ask("[bold white]Enter GitHub Repo URL[/bold white]").strip()
 

@@ -4,8 +4,16 @@ A simple TUI tool to probe GitHub contributions.
 
 ## Installation
 
+This project uses [uv](https://github.com/astral-sh/uv) for management:
+
 ```bash
-pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then, install the dependencies:
+
+```bash
+uv sync
 ```
 
 ## Usage
