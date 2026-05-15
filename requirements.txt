@@ -1,4 +1,6 @@
 gitdb==4.0.12
+pytest>=8.0
+requests>=2.32
 gitpython==3.1.47
 linkify-it-py==2.1.0
 markdown-it-py==4.0.0
@@ -14,3 +16,4 @@ textual==8.2.4
 typing-extensions==4.15.0
 uc-micro-py==2.0.0
 wcwidth==0.6.0
+python-lsp-server
