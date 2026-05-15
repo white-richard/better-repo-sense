@@ -72,6 +72,7 @@ class RepoSense:
                 choices=[
                     "View File Extensions",
                     "Filter Extensions",
+                    "Set Filter Date",
                     "Set Outlier Cap",
                     "View Weekly Commit Activity",
                     "View Git Contributions (+/- lines)",
@@ -94,6 +95,8 @@ class RepoSense:
                 self.view_file_extensions()
             elif choice == "Filter Extensions":
                 self.filter_extensions()
+            elif choice == "Set Filter Date":
+                self.set_filter_date()
             elif choice == "Set Outlier Cap":
                 self.set_outlier_cap()
             elif choice == "View Weekly Commit Activity":
@@ -141,6 +144,27 @@ class RepoSense:
                 f"[bold #50fa7b]Filter updated to: {', '.join(target) if target else 'All extensions'}[/bold #50fa7b]",
             )
 
+    def set_filter_date(self) -> None:
+        response = Prompt.ask(
+            "Set filter start date (YYYY-MM-DD, blank to clear)",
+            default="",
+        )
+        if response.strip() == "":
+            self.since_date = None
+            console.print("[bold #50fa7b]Filter date cleared (all history).[/bold #50fa7b]")
+            return
+        try:
+            parsed = datetime.strptime(response.strip(), "%Y-%m-%d").date()
+        except ValueError:
+            console.print(
+                "[bold #ff5555]Date must be in YYYY-MM-DD format.[/bold #ff5555]",
+            )
+            return
+        self.since_date = parsed.strftime("%Y-%m-%d")
+        console.print(
+            f"[bold #50fa7b]Filter date set to {self.since_date}.[/bold #50fa7b]",
+        )
+
     def set_outlier_cap(self) -> None:
         response = Prompt.ask(
             "Set outlier cap per commit per file type (blank to clear)",
@@ -165,15 +189,23 @@ class RepoSense:
             f"[bold #50fa7b]Outlier cap set to {cap} lines per commit per file type.[/bold #50fa7b]",
         )
 
+    def _get_default_ref(self) -> str:
+        try:
+            return self.repo.active_branch.name
+        except Exception:
+            return "HEAD"
+
     def _get_stats(self):
         stats = defaultdict(lambda: {"add": 0, "del": 0})
         log_args = [
-            "main",
-            f"--since={self.since_date}",
+            self._get_default_ref(),
             "--numstat",
             "--no-merges",
             "--pretty=format:%aN <%aE>",
+            "--",
         ]
+        if self.since_date:
+            log_args.insert(1, f"--since={self.since_date}")
         with console.status("[bold #ffb86c]Analyzing git log...[/bold #ffb86c]", spinner="dots"):
             raw_log = self.repo.git.log(*log_args)
             current_author = None
@@ -239,12 +271,13 @@ class RepoSense:
 
     def view_weekly_activity(self) -> None:
         weekly_log_args = [
-            "main",
-            f"--since={self.since_date}",
+            self._get_default_ref(),
             "--no-merges",
             "--pretty=format:%aN <%aE>|%ad",
             "--date=short",
         ]
+        if self.since_date:
+            weekly_log_args.insert(1, f"--since={self.since_date}")
         with console.status(
             "[bold #ffb86c]Analyzing weekly activity...[/bold #ffb86c]",
             spinner="dots",
@@ -308,12 +341,13 @@ class RepoSense:
                 "-C",
                 self.repo_dir,
                 "log",
-                "main",
+                self._get_default_ref(),
                 "-p",
                 "--color=always",
-                f"--since={self.since_date}",
                 f"--author={selected_user}",
             ]
+            if self.since_date:
+                cmd.append(f"--since={self.since_date}")
             if self.target_extensions:
                 cmd.append("--")
                 for ext in self.target_extensions:
@@ -343,7 +377,8 @@ class RepoSense:
 
         converted_count = 0
         with console.status(
-            "[bold #ffb86c]Converting .ipynb files...[/bold #ffb86c]", spinner="dots"
+            "[bold #ffb86c]Converting .ipynb files...[/bold #ffb86c]",
+            spinner="dots",
         ):
             for root, dirs, files in os.walk(self.repo_dir):
                 if ".git" in dirs:
@@ -373,11 +408,11 @@ class RepoSense:
                             converted_count += 1
                         except Exception as e:
                             console.print(
-                                f"[bold #ff5555]Failed to convert {file}: {e}[/bold #ff5555]"
+                                f"[bold #ff5555]Failed to convert {file}: {e}[/bold #ff5555]",
                             )
 
         console.print(
-            f"[bold #50fa7b]Successfully converted {converted_count} .ipynb files to .py and deleted originals.[/bold #50fa7b]"
+            f"[bold #50fa7b]Successfully converted {converted_count} .ipynb files to .py and deleted originals.[/bold #50fa7b]",
         )
         self.available_exts = get_unique_extensions(self.repo_dir)
 
