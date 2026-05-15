@@ -13,3 +13,7 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
+
+## Inspiration
+
+This idea is inspired by [RepoSense](https://github.com/RepoSense/reposense).
